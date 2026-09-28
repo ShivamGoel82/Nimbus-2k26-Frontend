@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -113,6 +114,41 @@ class PusherService extends ChangeNotifier {
   String? _currentRoomCode;
   String? _currentUserId;
 
+  Future<Map<String, dynamic>?> _authorizer(
+    String channelName,
+    String socketId,
+    dynamic options,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
+      final uri = Uri.parse('$_baseUrl/api/game/pusher/auth');
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'socket_id': socketId,
+          'channel_name': channelName,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        debugPrint('[Pusher] Authorizer success for $channelName');
+        return decoded;
+      } else {
+        debugPrint(
+          '[Pusher] Authorizer failed for $channelName (${response.statusCode}): ${response.body}',
+        );
+      }
+    } catch (e) {
+      debugPrint('[Pusher] Authorizer error for $channelName: $e');
+    }
+    return null;
+  }
+
   // ─── CONNECT ────────────────────────────────────────────────────────────────
 
   Future<void> ensureConnected() async {
@@ -129,6 +165,7 @@ class PusherService extends ChangeNotifier {
         authParams: {
           'headers': {'Authorization': 'Bearer $token'},
         },
+        onAuthorizer: _authorizer,
         onError: (message, code, error) {
           debugPrint('[Pusher] Error $code: $message — $error');
         },
@@ -163,6 +200,7 @@ class PusherService extends ChangeNotifier {
         authParams: {
           'headers': {'Authorization': 'Bearer $token'},
         },
+        onAuthorizer: _authorizer,
         onError: (message, code, error) {
           debugPrint('[Pusher] Error $code: $message — $error');
         },
@@ -392,11 +430,21 @@ class PusherService extends ChangeNotifier {
 
   // ─── HELPERS ────────────────────────────────────────────────────────────────
 
-  Map<String, dynamic>? _decode(String? raw) {
+  Map<String, dynamic>? _decode(dynamic raw) {
     if (raw == null) return null;
     try {
-      return jsonDecode(raw) as Map<String, dynamic>;
-    } catch (_) {
+      if (raw is Map) {
+        return Map<String, dynamic>.from(raw);
+      }
+      if (raw is String) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[Pusher] _decode error: $e');
       return null;
     }
   }

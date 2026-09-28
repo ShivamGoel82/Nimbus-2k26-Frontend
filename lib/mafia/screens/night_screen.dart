@@ -81,53 +81,20 @@ class _NightScreenState extends State<NightScreen> {
     );
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkSubscription();
-  }
-
-  void _checkSubscription() {
-    final gc = context.read<GameController>();
-    if (gc.status != GameStatus.NIGHT) return;
-
-    final me = gc.players.firstWhere(
-      (p) => p.userId == gc.myUserId,
-      orElse: () => const PlayerModel(
-        playerId: '',
-        userId: '',
-        name: '',
-        status: PlayerStatus.ELIMINATED,
-      ),
-    );
-    if (!me.isAlive) return;
-
-    String? team;
-    final role = gc.myRole;
-    if (role == GameRole.MAFIA) {
-      team = 'mafia';
-    } else if (role == GameRole.HITMAN && gc.hitmanMetMafia) {
-      team = 'mafia';
-    } else if ((role == GameRole.DOCTOR || role == GameRole.NURSE) &&
-        gc.roomSize == 'TWELVE' &&
-        gc.nurseMet) {
-      team = 'doc';
-    } else if (role == GameRole.CITIZEN) {
-      team = 'citizen';
+  void _updateTeamSubscription(String? team, String? roomCode) {
+    if (team == _subscribedTeam && roomCode == _cachedRoomCode) return;
+    if (_subscribedTeam != null && _cachedRoomCode != null) {
+      PusherService.instance.unsubscribeFromTeamChannel(
+        _cachedRoomCode!,
+        _subscribedTeam!,
+      );
     }
-
-    if (team != _subscribedTeam) {
-      if (_subscribedTeam != null && _cachedRoomCode != null) {
-        PusherService.instance.unsubscribeFromTeamChannel(
-          _cachedRoomCode!,
-          _subscribedTeam!,
-        );
-      }
+    setState(() {
       _subscribedTeam = team;
-      _cachedRoomCode = gc.roomCode;
-      if (team != null && _cachedRoomCode != null) {
-        PusherService.instance.subscribeToTeamChannel(_cachedRoomCode!, team);
-      }
+      _cachedRoomCode = roomCode;
+    });
+    if (team != null && roomCode != null) {
+      PusherService.instance.subscribeToTeamChannel(roomCode, team);
     }
   }
 
@@ -149,7 +116,6 @@ class _NightScreenState extends State<NightScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _checkSubscription();
     final controller = context.watch<GameController>();
     final myRole = controller.myRole ?? GameRole.CITIZEN;
     final isNight = controller.status == GameStatus.NIGHT;
@@ -296,7 +262,32 @@ class _NightScreenState extends State<NightScreen> {
       }
     }
 
+    String? activeTeam;
+    if (isAlive) {
+      if (myRole == GameRole.MAFIA) {
+        activeTeam = 'mafia';
+      } else if (myRole == GameRole.HITMAN && controller.hitmanMetMafia) {
+        activeTeam = 'mafia';
+      } else if ((myRole == GameRole.DOCTOR || myRole == GameRole.NURSE) &&
+          controller.roomSize == 'TWELVE' &&
+          controller.nurseMet) {
+        activeTeam = 'doc';
+      } else if (myRole == GameRole.CITIZEN) {
+        activeTeam = 'citizen';
+      }
+    }
+
+    if (activeTeam != _subscribedTeam && controller.roomCode != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _updateTeamSubscription(activeTeam, controller.roomCode);
+      });
+    }
+
+    final isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFF030712),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -330,9 +321,9 @@ class _NightScreenState extends State<NightScreen> {
           SafeArea(
             child: Column(
               children: [
-                const SizedBox(height: 12),
+                if (!isKeyboardOpen) const SizedBox(height: 12),
                 // Timer
-                if (controller.timeRemaining > 0)
+                if (controller.timeRemaining > 0 && !isKeyboardOpen)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: LinearPhaseTimer(
@@ -349,25 +340,26 @@ class _NightScreenState extends State<NightScreen> {
                     ),
                   ),
 
-                const SizedBox(height: 12),
+                if (!isKeyboardOpen) const SizedBox(height: 12),
 
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: Text(
-                    subtitle,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 14,
-                      color: Colors.white.withValues(alpha: 0.8),
+                if (!isKeyboardOpen)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Text(
+                      subtitle,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 14,
+                        color: Colors.white.withValues(alpha: 0.8),
+                      ),
                     ),
                   ),
-                ),
 
-                const SizedBox(height: 24),
+                if (!isKeyboardOpen) const SizedBox(height: 16),
 
-                // Main Interaction Area
-                if (hasAction)
+                // Main Interaction Area: hidden when keyboard opens to give full space to chat
+                if (hasAction && (!isKeyboardOpen || _subscribedTeam == null))
                   Expanded(
                     flex: _subscribedTeam != null ? 3 : 1,
                     child: SingleChildScrollView(
@@ -398,7 +390,7 @@ class _NightScreenState extends State<NightScreen> {
                       ),
                     ),
                   )
-                else if (_subscribedTeam == null)
+                else if (_subscribedTeam == null && !isKeyboardOpen)
                   const Expanded(
                     child: Center(
                       child: Icon(
@@ -410,11 +402,11 @@ class _NightScreenState extends State<NightScreen> {
                   ),
 
                 // Night Chat Area
-                if (_subscribedTeam != null)
+                if (activeTeam != null)
                   Expanded(
                     flex: 4,
                     child: Container(
-                      margin: const EdgeInsets.only(top: 8),
+                      margin: EdgeInsets.only(top: isKeyboardOpen ? 0 : 8),
                       decoration: BoxDecoration(
                         color: const Color(0xFF0A0F1C),
                         border: Border(
@@ -423,12 +415,12 @@ class _NightScreenState extends State<NightScreen> {
                           ),
                         ),
                       ),
-                      child: ChatWidget(teamChannel: _subscribedTeam),
+                      child: ChatWidget(teamChannel: activeTeam),
                     ),
                   ),
 
                 // Info/Error Message
-                if (controller.error != null)
+                if (controller.error != null && !isKeyboardOpen)
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -439,7 +431,8 @@ class _NightScreenState extends State<NightScreen> {
 
                 // Controls (Standard)
                 if (hasAction &&
-                    myRole != GameRole.HITMAN)
+                    myRole != GameRole.HITMAN &&
+                    !isKeyboardOpen)
                   Padding(
                     padding: const EdgeInsets.all(24.0),
                     child: Column(
@@ -513,7 +506,7 @@ class _NightScreenState extends State<NightScreen> {
                     ),
                   )
                 // Controls (Hitman)
-                else if (hasAction && myRole == GameRole.HITMAN)
+                else if (hasAction && myRole == GameRole.HITMAN && !isKeyboardOpen)
                   Padding(
                     padding: const EdgeInsets.all(24.0),
                     child: SizedBox(

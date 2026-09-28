@@ -316,6 +316,7 @@ class _ChatWidgetState extends State<ChatWidget> {
           ),
           child: SafeArea(
             top: false,
+            bottom: MediaQuery.of(context).viewInsets.bottom == 0,
             child: Row(
               children: [
                 Expanded(
@@ -350,7 +351,8 @@ class _ChatWidgetState extends State<ChatWidget> {
                                 vertical: 10,
                               ),
                             ),
-                            maxLines: null,
+                            minLines: 1,
+                            maxLines: 4,
                             keyboardType: TextInputType.text,
                             textInputAction: TextInputAction.send,
                             onSubmitted: (_) => _sendMessage(),
