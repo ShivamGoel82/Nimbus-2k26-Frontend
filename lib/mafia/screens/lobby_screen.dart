@@ -333,9 +333,10 @@ class _LobbyScreenState extends State<LobbyScreen>
         devMode: _devMode,
         devHostRole: _devHostRole?.name,
       );
-      // The backend broadcasts 'game-started' via Pusher.
-      // _startSub in _subscribeLobbyEvents handles navigation for ALL players
-      // (including the host), so nothing more to do here.
+      if (mounted && _roomCode != null && _myUserId != null) {
+        final gc = context.read<GameController>();
+        await gc.init(_roomCode!, _myUserId!);
+      }
     } on GameApiException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
@@ -1425,19 +1426,16 @@ class _LobbyScreenState extends State<LobbyScreen>
 
 
   Widget _buildStartButton() {
-    // In dev mode: can always start (bots will fill remaining slots)
-    // Normal mode: need a full room
-    final canStart = (_roomFull || _devMode) && !_loading;
+    // In both modes: can always start (bots will fill remaining slots)
+    final canStart = !_loading;
     final roomMax = _roomSize == 'FIVE'
         ? 5
         : _roomSize == 'EIGHT'
         ? 8
         : 12;
-    final label = _devMode
-        ? (_roomFull
-              ? 'Start Game'
-              : 'Start with Bots (${_players.length}/$roomMax)')
-        : (_roomFull ? 'Start Game' : 'Waiting for players...');
+    final label = _roomFull
+        ? 'Start Game'
+        : 'Start with Bots (${_players.length}/$roomMax)';
     return _PrimaryButton(
       label: label,
       icon: Icons.play_arrow_rounded,
